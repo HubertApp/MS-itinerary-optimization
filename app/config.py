@@ -1,5 +1,9 @@
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 BBOX = {"north": 51.06, "south": 50.98, "east": 2.46, "west": 2.28}
 
 
