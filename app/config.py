@@ -22,7 +22,8 @@ POINTS = _grille(3)
 TRAFFIC_SOURCE = os.getenv("TRAFFIC_SOURCE", "synthetic")
 TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY", "")
 
-DB_PATH = os.getenv("DB_PATH", "mongodb")
+MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+MONGODB_DB = os.getenv("MONGODB_DB", "optimization_db")
 MODEL_PATH = os.getenv("MODEL_PATH", "friction.joblib")
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://user:password@localhost:5672/")
 
