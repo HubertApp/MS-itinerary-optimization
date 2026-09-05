@@ -1,5 +1,15 @@
+.venv/
 venv/
 __pycache__/
-*.pyc
+**/__pycache__/
+*.py[cod]
+.git/
+.github/
+.pytest_cache/
+.coverage
+htmlcov/
+.vscode/
+.idea/
 .env
-.git/s
+.env.*
+README.md

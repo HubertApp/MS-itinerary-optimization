@@ -1,0 +1,57 @@
+services:
+
+  itinerary-optimization:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ms-itinerary-optimization
+    labels:
+      logging: "promtail"
+      service: "itinerary-optimization"
+    ports:
+      - "3010:3010"
+    environment:
+      PORT: 3010
+      LOG_LEVEL: INFO
+
+      MONGODB_URL: mongodb://mongo:27017
+      MONGODB_DB: ${MONGODB_DB:-optimization_db}
+
+      TRAFFIC_SOURCE: ${TRAFFIC_SOURCE:-synthetic}
+      TOMTOM_API_KEY: ${TOMTOM_API_KEY:-}
+      MODEL_PATH: ${MODEL_PATH:-friction.joblib}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://user:password@rabbitmq:5672/}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - hubert-network
+      - itinerary-optimization-network
+
+  mongo:
+    image: mongo:7
+    container_name: ms-itinerary-optimization-mongo
+    # publie sur l'hote pour que le backfill puisse tourner hors conteneur
+    # pendant le developpement
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - itinerary-optimization-network
+
+volumes:
+  mongo-data:
+
+networks:
+  hubert-network:
+    external: true
+
+  itinerary-optimization-network:
+    driver: bridge
