@@ -18,9 +18,12 @@ services:
       MONGODB_DB: ${MONGODB_DB:-optimization_db}
 
       TRAFFIC_SOURCE: ${TRAFFIC_SOURCE:-synthetic}
-      TOMTOM_API_KEY: ${TOMTOM_API_KEY:-}
       MODEL_PATH: ${MODEL_PATH:-friction.joblib}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://user:password@rabbitmq:5672/}
+    # RABBITMQ_URL et TOMTOM_API_KEY portent des secrets : ils viennent du
+    # .env local, jamais d'une valeur en dur versionnee. Voir .env.example.
+    env_file:
+      - path: .env
+        required: false
     depends_on:
       mongo:
         condition: service_healthy
@@ -31,10 +34,11 @@ services:
   mongo:
     image: mongo:7
     container_name: ms-itinerary-optimization-mongo
-    # publie sur l'hote pour que le backfill puisse tourner hors conteneur
-    # pendant le developpement
+    # Publie sur l'hote pour lancer le backfill hors conteneur pendant le
+    # developpement, mais sur la loopback uniquement : cette instance n'a pas
+    # d'authentification, la lier a 0.0.0.0 l'ouvrirait a tout le reseau local.
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongo-data:/data/db
     healthcheck:
