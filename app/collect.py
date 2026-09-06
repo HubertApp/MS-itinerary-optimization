@@ -10,9 +10,11 @@ import math
 import random
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
-from app.config import FRICTION_MAX, FRICTION_MIN
+from app.calendrier import is_public_holiday
+from app.config import FRICTION_MAX, FRICTION_MIN, POINTS, tile_id
+from app.store import save_observations
 
 
 def _tile_busyness(tile: str) -> float:
@@ -104,3 +106,57 @@ def _fake_weather(moment: datetime) -> dict:
         "precipitation_mm": rain,
         "wind_speed_kmh": round(8 + generator.random() * 25, 1),
     }
+
+
+WEATHER_FIELDS = ("temperature_c", "precipitation_mm", "wind_speed_kmh")
+
+
+def _observation_rows(tile, weather_by_hour, start, end, source):
+    """Genere une observation par heure sur [start, end[.
+
+    Separe de backfill pour que la construction des lignes soit verifiable
+    sans base de donnees.
+    """
+    moment = start
+    while moment < end:
+        weather = weather_by_hour.get(moment.strftime("%Y-%m-%dT%H:00"))
+        # Open-Meteo peut renvoyer une cle horaire presente avec des valeurs
+        # nulles en bord d'intervalle. Sans ce garde-fou on insere des None,
+        # et le modele se degrade sans qu'aucune erreur ne le signale.
+        if not weather or any(weather.get(f) is None for f in WEATHER_FIELDS):
+            weather = _fake_weather(moment)
+
+        yield {
+            "tile_id": tile,
+            "observed_at": moment.isoformat(),
+            "friction": synthetic_friction(moment, tile, weather["precipitation_mm"]),
+            "is_public_holiday": is_public_holiday(moment),
+            "source": source,
+            **weather,
+        }
+        moment += timedelta(hours=1)
+
+
+def backfill(weeks: int = 8) -> int:
+    """Fabrique un historique d'un coup, pour ne pas attendre un mois avant de
+    pouvoir entrainer quoi que ce soit.
+
+    La meteo est REELLE (archive Open-Meteo), le trafic est synthetique.
+    """
+    end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    start = end - timedelta(weeks=weeks)
+    total = 0
+
+    for lat, lon in POINTS:
+        tile = tile_id(lat, lon)
+        weather_by_hour = fetch_weather(
+            lat,
+            lon,
+            start_date=start.strftime("%Y-%m-%d"),
+            end_date=end.strftime("%Y-%m-%d"),
+        )
+        rows = list(_observation_rows(tile, weather_by_hour, start, end, "backfill"))
+        total += save_observations(rows)
+        print(f"  {tile} : {len(rows)} lignes")
+
+    return total
