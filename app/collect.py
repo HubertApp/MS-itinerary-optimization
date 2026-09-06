@@ -13,7 +13,14 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 from app.calendrier import is_public_holiday
-from app.config import FRICTION_MAX, FRICTION_MIN, POINTS, tile_id
+from app.config import (
+    FRICTION_MAX,
+    FRICTION_MIN,
+    POINTS,
+    TOMTOM_API_KEY,
+    TRAFFIC_SOURCE,
+    tile_id,
+)
 from app.store import save_observations
 
 
@@ -111,6 +118,20 @@ def _fake_weather(moment: datetime) -> dict:
 WEATHER_FIELDS = ("temperature_c", "precipitation_mm", "wind_speed_kmh")
 
 
+def _weather_at(weather_by_hour: dict, moment: datetime) -> dict:
+    """Meteo de l'heure, ou repli complet.
+
+    Open-Meteo peut renvoyer une cle horaire presente avec des valeurs nulles
+    en bord d'intervalle. Sans ce garde-fou on insere des None, et le modele
+    se degrade sans qu'aucune erreur ne le signale. On remplace la meteo
+    entiere plutot que le champ manquant, pour garder la ligne coherente.
+    """
+    weather = weather_by_hour.get(moment.strftime("%Y-%m-%dT%H:00"))
+    if not weather or any(weather.get(field) is None for field in WEATHER_FIELDS):
+        return _fake_weather(moment)
+    return weather
+
+
 def _observation_rows(tile, weather_by_hour, start, end, source):
     """Genere une observation par heure sur [start, end[.
 
@@ -119,13 +140,7 @@ def _observation_rows(tile, weather_by_hour, start, end, source):
     """
     moment = start
     while moment < end:
-        weather = weather_by_hour.get(moment.strftime("%Y-%m-%dT%H:00"))
-        # Open-Meteo peut renvoyer une cle horaire presente avec des valeurs
-        # nulles en bord d'intervalle. Sans ce garde-fou on insere des None,
-        # et le modele se degrade sans qu'aucune erreur ne le signale.
-        if not weather or any(weather.get(f) is None for f in WEATHER_FIELDS):
-            weather = _fake_weather(moment)
-
+        weather = _weather_at(weather_by_hour, moment)
         yield {
             "tile_id": tile,
             "observed_at": moment.isoformat(),
@@ -160,3 +175,55 @@ def backfill(weeks: int = 8) -> int:
         print(f"  {tile} : {len(rows)} lignes")
 
     return total
+
+
+TOMTOM_URL = "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
+
+
+def tomtom_friction(lat: float, lon: float) -> float | None:
+    """currentTravelTime / freeFlowTravelTime : deja dans la bonne unite.
+
+    Retourne None des que la donnee est indisponible, pour laisser l'appelant
+    basculer sur le synthetique.
+    """
+    if not TOMTOM_API_KEY:
+        return None
+    try:
+        payload = _get_json(TOMTOM_URL, {"key": TOMTOM_API_KEY, "point": f"{lat},{lon}"})
+        data = payload["flowSegmentData"]
+        if data.get("roadClosure"):
+            return FRICTION_MAX
+        ratio = data["currentTravelTime"] / max(data["freeFlowTravelTime"], 1)
+        return round(max(FRICTION_MIN, min(FRICTION_MAX, ratio)), 3)
+    except Exception as error:  # noqa: BLE001
+        print(f"  tomtom indisponible ({error})")
+        return None
+
+
+def collect_now() -> int:
+    """Une passe de collecte, a lancer toutes les 15 minutes en cron.
+
+    Repli en cascade TomTom -> synthetique : une cle absente, un quota depasse
+    ou une panne reseau n'interrompt jamais le remplissage de la base.
+    """
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    rows = []
+
+    for lat, lon in POINTS:
+        tile = tile_id(lat, lon)
+        weather = _weather_at(fetch_weather(lat, lon), now)
+
+        friction = tomtom_friction(lat, lon) if TRAFFIC_SOURCE == "tomtom" else None
+        if friction is None:
+            friction = synthetic_friction(now, tile, weather["precipitation_mm"])
+
+        rows.append({
+            "tile_id": tile,
+            "observed_at": now.isoformat(),
+            "friction": friction,
+            "is_public_holiday": is_public_holiday(now),
+            "source": TRAFFIC_SOURCE,
+            **weather,
+        })
+
+    return save_observations(rows)
