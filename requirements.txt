@@ -9,3 +9,4 @@ fastapi
 uvicorn
 strawberry-graphql[fastapi]
 faststream[rabbit]
+python-dotenv
