@@ -15,7 +15,15 @@ from datetime import datetime, timezone
 from app import store
 from app.calendrier import is_public_holiday
 from app.collect import _weather_at, backfill, collect_now, fetch_weather
-from app.config import BBOX, POINTS, tile_id
+from app.config import (
+    BBOX,
+    POINTS,
+    case_de,
+    en_france,
+    tile_id,
+    tuile_modele,
+    tuiles_autour,
+)
 from app.model import infos, predict_friction
 
 
@@ -27,7 +35,6 @@ def _meteo_par_tuile(moment: datetime) -> dict:
 
 
 def friction_map(moment: datetime) -> dict:
-
     meteo = _meteo_par_tuile(moment)
     rows = [
         {"tile_id": tuile, "observed_at": moment.isoformat(),
@@ -45,6 +52,41 @@ def friction_map(moment: datetime) -> dict:
                 carte[tuile] = round(carte.get(tuile, 1.0) * event["multiplier"], 3)
 
     return carte
+
+
+def prevision_autour(moment: datetime, lat: float, lon: float, rayon_m: float) -> dict:
+    autour = tuiles_autour(lat, lon, rayon_m)
+    couvertes = [t for t in autour if tuile_modele(t["lat"], t["lon"])]
+    zone_moyenne = not couvertes and en_france(lat, lon)
+    if not couvertes and not zone_moyenne:
+        return {"total": len(autour), "tuiles": []}
+
+    conditions = _weather_at(fetch_weather(lat, lon), moment)
+    commun = {"observed_at": moment.isoformat(),
+              "is_public_holiday": is_public_holiday(moment), **conditions}
+
+    if zone_moyenne:
+        rows = [{"tile_id": tile_id(p_lat, p_lon), **commun} for p_lat, p_lon in POINTS]
+        moyenne = float(predict_friction(rows).mean())
+        couvertes = [{**case_de(lat, lon), "distance_m": 0.0}]
+        valeurs = [moyenne]
+    else:
+        rows = [{"tile_id": tuile_modele(t["lat"], t["lon"]), **commun}
+                for t in couvertes]
+        valeurs = predict_friction(rows)
+
+    evenements = store.events_active_at(moment.isoformat())
+
+    tuiles = []
+    for t, valeur in zip(couvertes, valeurs):
+        friction = round(float(valeur), 3)
+        for event in evenements:
+            if (event["south"] <= t["lat"] <= event["north"]
+                    and event["west"] <= t["lon"] <= event["east"]):
+                friction = round(friction * event["multiplier"], 3)
+        tuiles.append({**t, "friction": friction})
+
+    return {"total": len(autour), "tuiles": tuiles}
 
 
 def _moment_depuis(texte: str | None) -> datetime:
