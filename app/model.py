@@ -28,8 +28,8 @@ def charger(model_path: str = MODEL_PATH) -> dict:
         bundle = joblib.load(model_path)
     except FileNotFoundError:
         raise RuntimeError(
-            f"Aucun modele a {model_path}. Entrainez-le dans le notebook Colab, "
-            f"telechargez friction.joblib et deposez-le ici."
+            f"Aucun modele a {model_path}."
+    
         ) from None
 
     if not isinstance(bundle, dict):

@@ -1,12 +1,12 @@
 services:
 
-  itinerary-optimization:
+  service-itinerary-optimization:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ms-itinerary-optimization
+    container_name: service_itinerary-optimization
     labels:
-      logging: "promtail"
+      logging: "enabled"
       service: "itinerary-optimization"
     ports:
       - "3010:3010"
@@ -18,12 +18,15 @@ services:
       MONGODB_DB: ${MONGODB_DB:-optimization_db}
 
       TRAFFIC_SOURCE: ${TRAFFIC_SOURCE:-synthetic}
-      MODEL_PATH: ${MODEL_PATH:-friction.joblib}
+      MODEL_PATH: /app/model/friction.joblib
     # RABBITMQ_URL et TOMTOM_API_KEY portent des secrets : ils viennent du
     # .env local, jamais d'une valeur en dur versionnee. Voir .env.example.
     env_file:
       - path: .env
         required: false
+    volumes:
+
+      - ./model:/app/model:ro
     depends_on:
       mongo:
         condition: service_healthy
